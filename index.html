@@ -49,6 +49,10 @@ body{
 .bar{flex:none;height:54px;display:flex;align-items:center;justify-content:space-between;
   padding:0 26px;border-bottom:1px solid var(--line)}
 .bar-l{display:flex;align-items:center;gap:11px}
+.bar-r{display:flex;align-items:center;gap:10px}
+.snd{background:none;border:0;color:var(--dim);font-size:15px;line-height:1;cursor:pointer;padding:4px 2px}
+.snd:hover{color:var(--ink2)}
+.snd.off{opacity:.35;text-decoration:line-through}
 .back{background:none;border:0;color:var(--dim);font-family:var(--serif);font-size:19px;line-height:1;
   padding:2px 4px 3px;cursor:pointer;transition:color .2s}
 .back:hover{color:var(--ink)}
@@ -403,10 +407,13 @@ body{
 .tb-stk.hot{color:var(--zhu2)}
 .tb-pot{font-style:normal;font-size:9px;color:#e6c67e;border:1px solid rgba(195,163,99,.55);
   padding:0 4px;margin-left:6px;letter-spacing:.1em}
-#fx{position:fixed;left:0;right:0;bottom:0;z-index:60;display:none;justify-content:center;
-  pointer-events:none;padding:0 24px 44px}
+#fx{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);z-index:60;display:none;
+  justify-content:center;pointer-events:none;padding:0 24px}
 #fx.on{display:flex}
-.bigcard{text-align:center;padding:6px 10px;animation:pop .5s var(--ease) both}
+.bigcard{text-align:center;padding:16px 22px;animation:pop .5s var(--ease) both;
+  background:radial-gradient(closest-side,rgba(8,11,14,.86),rgba(8,11,14,0) 82%)}
+.ahint{transition:opacity .25s}
+body.fx-on .ahint{opacity:0}
 .bigcard .t{font-size:52px;font-weight:300;letter-spacing:.22em;line-height:1.1;color:var(--gold);
   text-shadow:0 0 30px rgba(195,163,99,.28)}
 .bigcard .s{font-size:10.5px;letter-spacing:.18em;color:var(--ink2);margin-top:6px}
@@ -440,7 +447,10 @@ body{
       <button class="back" id="btnBack" hidden aria-label="返回上一级">‹</button>
       <div class="brand"><i></i>梅花卜记</div>
     </div>
-    <div class="chapter" id="chapter">一 · <b>问事</b></div>
+    <div class="bar-r">
+      <div class="chapter" id="chapter">一 · <b>问事</b></div>
+      <button class="snd" id="btnSound" aria-label="音效开关">♪</button>
+    </div>
   </header>
 
   <main class="stage" id="stage">
@@ -2043,6 +2053,7 @@ function doCast(){
   pickedGear = 0; E.setGearPick(0);
   renderGua();
   renderUse();
+  try { SFX.cast(); } catch(e){}
 }
 function shortCi(name){
   var t = D.GUA_CI[name] || ''; var i = t.indexOf('。');
@@ -2397,6 +2408,68 @@ function strike(fromEl, toEl, bad){
   }, 900);
 }
 
+/* ---------- 音效：五音（宫商角徵羽）合成，不用任何音频文件 ---------- */
+var SFX = (function(){
+  var ac = null, on = true;
+  try { on = localStorage.getItem('mh_snd') !== '0'; } catch(e){}
+  // 五行 → 五音：角(木) 徵(火) 宫(土) 商(金) 羽(水)
+  var YIN  = { 木:'角', 火:'徵', 土:'宫', 金:'商', 水:'羽' };
+  var FREQ = { 宫:261.63, 商:293.66, 角:329.63, 徵:392.00, 羽:440.00 };
+  function ctx(){
+    if (!ac){
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try { ac = new AC(); } catch(e){ return null; }
+    }
+    if (ac.state === 'suspended'){ try { ac.resume(); } catch(e){} }
+    return ac;
+  }
+  function tone(freq, dur, type, vol, delay, glide){
+    if (!on) return;
+    var c = ctx(); if (!c) return;
+    try {
+      var t0 = c.currentTime + (delay || 0);
+      var o = c.createOscillator(), g = c.createGain(), lp = c.createBiquadFilter();
+      o.type = type || 'sine';
+      o.frequency.setValueAtTime(freq, t0);
+      if (glide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * glide), t0 + dur);
+      lp.type = 'lowpass'; lp.frequency.value = 2800;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol || .07), t0 + .012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(lp); lp.connect(g); g.connect(c.destination);
+      o.start(t0); o.stop(t0 + dur + .06);
+    } catch(e){}
+  }
+  function base(el){ return FREQ[YIN[el]] || FREQ['角']; }
+  return {
+    on: function(){ return on; },
+    toggle: function(){ on = !on; try { localStorage.setItem('mh_snd', on ? '1' : '0'); } catch(e){} return on; },
+    wake: function(){ if (on) ctx(); },
+    tap: function(){ tone(760, .05, 'sine', .025); },
+    cast: function(){ [0, 4, 7].forEach(function(n, i){ tone(261.63 * Math.pow(2, n/12), .5, 'sine', .05, i*.1); }); },
+    sign: function(){ [0, 2, 4, 7, 9].forEach(function(n, i){ tone(261.63 * Math.pow(2, n/12), i===4 ? .9 : .4, 'sine', .045, i*.13); }); },
+    fx: function(title, toneName, el){
+      var fq = base(el);
+      switch (title){
+        case '克': tone(fq, .16, 'triangle', .10); tone(fq*1.5, .22, 'sine', .05, .015); break;
+        case '耗': tone(fq*.5, .26, 'sine', .12, 0, .82); break;
+        case '生': case '得资': case '资':
+          tone(fq, .12, 'sine', .06); tone(fq*1.25, .2, 'sine', .045, .08); break;
+        case '被克': case '×':
+          tone(fq, .26, 'sawtooth', .032); tone(fq*1.06, .26, 'sine', .045); break;
+        case '断': case '过旺':
+          tone(70, .5, 'sine', .16, 0, .75); tone(fq*.5, .3, 'triangle', .055); break;
+        case '死': case '相': case '休': case '囚':
+          tone(fq, .14, 'sine', .055); tone(fq*1.5, .18, 'sine', .03, .07); break;
+        case '胜': [0,4,7].forEach(function(n,i){ tone(261.63*Math.pow(2,n/12), .42, 'sine', .055, i*.1); }); break;
+        case '负': [7,4,0].forEach(function(n,i){ tone(261.63*Math.pow(2,n/12), .5, 'sine', .05, i*.12); }); break;
+        default: tone(fq, .16, 'sine', .045);
+      }
+    }
+  };
+})();
+
 /* ---------- 演出 ---------- */
 function wait(ms){
   return new Promise(function(res){
@@ -2408,13 +2481,15 @@ function wait(ms){
     })();
   });
 }
-function showFx(f, hold){
+function showFx(f, hold, el){
+  try { SFX.fx(f.title, f.tone, el); } catch(e){}
+  document.body.classList.add('fx-on');
   var box = $('#fx');
   box.innerHTML = '<div class="bigcard '+(f.tone||'neutral')+'"><div class="t">'+f.title+'</div>'
     + '<div class="s">'+f.text+'</div></div>';
   box.classList.add('on');
-  if (window.__fast){ box.classList.remove('on'); box.innerHTML=''; return Promise.resolve(); }
-  return wait(hold).then(function(){ box.classList.remove('on'); box.innerHTML = ''; });
+  if (window.__fast){ box.classList.remove('on'); box.innerHTML=''; document.body.classList.remove('fx-on'); return Promise.resolve(); }
+  return wait(hold).then(function(){ box.classList.remove('on'); box.innerHTML = ''; document.body.classList.remove('fx-on'); });
 }
 function diffDmg(before, after){
   var out = { me:{}, foe:{} };
@@ -2454,7 +2529,12 @@ async function play(beats){
     if (fx2.length){
       for (var k=0;k<fx2.length;k++){
         var f = fx2[k];
-        await showFx(f, (f.ttl||1000) >= 1500 ? 1100 : 620);
+        var elUse = null;
+        if (b.tag){
+          if (b.tag.kind === 'attack') elUse = (b.who === 'me' ? G.me.el[b.tag.p] : G.foe.el[b.tag.p]);
+          else if (b.tag.act && b.tag.act.kind === 'attack') elUse = G.foe.el[b.tag.act.p];
+        }
+        await showFx(f, (f.ttl||1000) >= 1500 ? 1100 : 620, elUse);
         hold += 60;
       }
     } else {
@@ -2500,7 +2580,8 @@ function toSign(){
     + '<div class="sub">'+Math.min(G.turn,P.turns)+' 回合 · 我体 '+Math.max(0,G.me.hp.body)
     + ' · 用体 '+Math.max(0,G.foe.hp.body)+'</div>';
   renderSignCard(d.s, d.c);
-  signUrl = null;          // 只在「保存卦签」时才画图
+  signUrl = null;
+  try { SFX.sign(); } catch(e){}          // 只在「保存卦签」时才画图
 }
 function renderSignCard(s, c){
   var tri = s.tri.map(function(t,i){
@@ -2753,6 +2834,17 @@ function autoStep(){
   var a = E.aiChoose(G.me, G.foe);
   if (a) E.doMove(a[0], a[1]);
 }
+document.addEventListener('pointerdown', function(){ try { SFX.wake(); } catch(e){} }, { once:true });
+document.addEventListener('click', function(ev){
+  var b = ev.target && ev.target.closest ? ev.target.closest('.btn, .tutlink, .snd') : null;
+  if (b) { try { SFX.tap(); } catch(e){} }
+});
+$('#btnSound').addEventListener('click', function(){
+  var on = SFX.toggle();
+  this.classList.toggle('off', !on);
+  if (on) try { SFX.tap(); } catch(e){}
+});
+if (!SFX.on()) $('#btnSound').classList.add('off');
 $('#btnAbout').addEventListener('click', function(){ $('#aboutModal').classList.add('on'); });
 $('#aboutClose').addEventListener('click', function(){ $('#aboutModal').classList.remove('on'); });
 $('#aboutBg').addEventListener('click', function(){ $('#aboutModal').classList.remove('on'); });
